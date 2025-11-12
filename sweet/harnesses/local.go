@@ -5,6 +5,8 @@
 package harnesses
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 
@@ -27,7 +29,48 @@ func (h *localBenchHarness) Get(_ *common.GetConfig) error {
 }
 
 func (h *localBenchHarness) Build(cfg *common.Config, bcfg *common.BuildConfig) error {
-	return cfg.GoTool(bcfg.BuildLog).BuildPath(bcfg.BenchDir, filepath.Join(bcfg.BinDir, h.binName))
+	targetBin := filepath.Join(bcfg.BinDir, h.binName)
+
+	// Check for prebuilt binary if prebuilt binary directory is specified
+	if bcfg.PrebuiltBinaryDir != "" {
+		// Construct prebuilt binary path: prebuilt-binary-dir/benchmark-name
+		prebuiltBin := filepath.Join(bcfg.PrebuiltBinaryDir, h.binName)
+		log.Printf("Checking for prebuilt binary from -prebuilt-binary-dir: %s", prebuiltBin)
+
+		if info, err := os.Stat(prebuiltBin); err == nil && !info.IsDir() {
+			// Prebuilt binary exists, copy it instead of building
+			if bcfg.BuildLog != nil {
+				fmt.Fprintf(bcfg.BuildLog, "Prebuilt binary found at %s, copying to %s\n", prebuiltBin, targetBin)
+			}
+			log.Printf("✓ Successfully using prebuilt binary from -prebuilt-binary-dir: %s -> %s", prebuiltBin, targetBin)
+
+			// Read the prebuilt binary
+			srcData, err := os.ReadFile(prebuiltBin)
+			if err != nil {
+				return fmt.Errorf("failed to read prebuilt binary %s: %w", prebuiltBin, err)
+			}
+
+			// Write to target location
+			if err := os.WriteFile(targetBin, srcData, 0755); err != nil {
+				return fmt.Errorf("failed to write binary to %s: %w", targetBin, err)
+			}
+
+			log.Printf("✓ Prebuilt binary copied successfully: %s (size: %d bytes)", targetBin, len(srcData))
+			return nil
+		} else if err != nil && !os.IsNotExist(err) {
+			// Error other than file not found
+			log.Printf("✗ Error checking prebuilt binary %s: %v", prebuiltBin, err)
+			return fmt.Errorf("failed to check prebuilt binary %s: %w", prebuiltBin, err)
+		}
+		// Prebuilt binary doesn't exist, fall through to normal build
+		log.Printf("✗ Prebuilt binary not found at %s (from -prebuilt-binary-dir), will build from source", prebuiltBin)
+		if bcfg.BuildLog != nil {
+			fmt.Fprintf(bcfg.BuildLog, "Prebuilt binary not found at %s, building from source\n", prebuiltBin)
+		}
+	}
+
+	// Normal build path
+	return cfg.GoTool(bcfg.BuildLog).BuildPath(bcfg.BenchDir, targetBin)
 }
 
 func (h *localBenchHarness) Run(cfg *common.Config, rcfg *common.RunConfig) error {

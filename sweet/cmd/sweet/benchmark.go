@@ -245,20 +245,26 @@ func (b *benchmark) execute(cfgs []*common.Config, r *runCfg) error {
 	// Check if assets for this benchmark exist. Not all benchmarks have assets!
 	var hasAssets bool
 	assetsFSDir := b.name
-	if f, err := r.assetsFS.Open(assetsFSDir); err == nil {
-		fi, err := f.Stat()
-		if err != nil {
+
+	if r.assetsFS == nil {
+		// No assets available, but that's OK if the benchmark doesn't need them
+		hasAssets = false
+	} else {
+		if f, err := r.assetsFS.Open(assetsFSDir); err == nil {
+			fi, err := f.Stat()
+			if err != nil {
+				f.Close()
+				return err
+			}
+			if !fi.IsDir() {
+				f.Close()
+				return fmt.Errorf("found assets file for %s instead of directory", b.name)
+			}
 			f.Close()
+			hasAssets = true
+		} else if !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
-		if !fi.IsDir() {
-			f.Close()
-			return fmt.Errorf("found assets file for %s instead of directory", b.name)
-		}
-		f.Close()
-		hasAssets = true
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return err
 	}
 
 	// Retrieve the benchmark's source, if needed. If execute is called
@@ -326,19 +332,47 @@ func (b *benchmark) execute(cfgs []*common.Config, r *runCfg) error {
 			return fmt.Errorf("create %s build log file for %s: %v", b.name, cfg.Name, err)
 		}
 
+		// Log assets source information to build log
+		if hasAssets {
+			fmt.Fprintf(buildLog, "Assets source: assets directory\n")
+		}
+
 		// Build the benchmark (application and any other necessary components).
 		bcfg := common.BuildConfig{
-			BinDir:   binDir,
-			SrcDir:   srcDir,
-			BenchDir: benchDir,
-			Short:    r.short,
-			BuildLog: buildLog,
+			BinDir:            binDir,
+			SrcDir:            srcDir,
+			BenchDir:          benchDir,
+			Short:             r.short,
+			BuildLog:          buildLog,
+			PrebuiltBinaryDir: r.prebuiltBinaryDir,
 		}
 		if err := b.harness.Build(cfg, &bcfg); err != nil {
 			buildLog.Close()
 			return fmt.Errorf("build %s for %s: %v", b.name, cfg.Name, err)
 		}
 		buildLog.Close()
+
+		// Copy compiled binaries to output directory if specified
+		if r.compileOutDir != "" {
+			outDir := filepath.Join(r.compileOutDir, b.name, cfg.Name)
+			if err := mkdirAll(outDir); err != nil {
+				return fmt.Errorf("failed to create compile output directory %s for %s/%s: %v", outDir, b.name, cfg.Name, err)
+			}
+			if err := copyDirContents(outDir, binDir); err != nil {
+				return fmt.Errorf("failed to copy compiled binaries from %s to %s for %s/%s: %v", binDir, outDir, b.name, cfg.Name, err)
+			}
+			log.Printf("Copied compiled binaries for %s/%s to %s", b.name, cfg.Name, outDir)
+			if buildLog, err := os.OpenFile(buildLogPath, os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+				fmt.Fprintf(buildLog, "Copied compiled binaries to %s\n", outDir)
+				buildLog.Close()
+			}
+		}
+
+		// If compile-only mode, skip setting up for running benchmarks
+		if r.compileOnly {
+			log.Printf("Compilation completed for %s/%s", b.name, cfg.Name)
+			continue
+		}
 
 		// Generate any args to funnel through to benchmarks.
 		args := []string{}
@@ -387,11 +421,20 @@ func (b *benchmark) execute(cfgs []*common.Config, r *runCfg) error {
 		})
 	}
 
+	// If compile-only mode, print completion message and return
+	if r.compileOnly {
+		log.Printf("Compilation completed for benchmark %s (all configurations)", b.name)
+		return nil
+	}
+
 	for j := 0; j < r.count; j++ {
 		// Execute the benchmark for each configuration.
 		for i, setup := range setups {
 			if hasAssets {
 				// Set up assets directory for test run.
+				if r.assetsFS == nil {
+					return fmt.Errorf("assets not available: did you forget to run `sweet get` or specify -assets-dir?")
+				}
 				r.logCopyDirCommand(b.name, setup.AssetsDir)
 				if err := fileutil.CopyDir(setup.AssetsDir, assetsFSDir, r.assetsFS); err != nil {
 					return err
