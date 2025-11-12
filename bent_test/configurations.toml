@@ -1,12 +1,10 @@
 [[Configurations]]
   Name = "RISC-V-Static"
   Root = "$HOME/YOUR/GOROOT/PATH"
-  # 交叉编译环境变量
   GcEnv = [
     "GOOS=linux",
     "GOARCH=riscv64",
-    "CGO_ENABLED=0"  # 禁用 CGO 以实现纯静态编译
+    "CGO_ENABLED=0"
   ]
-  # 如果需要静态链接 C 库（当 CGO_ENABLED=1 时）
   # BuildFlags = ["-ldflags=-linkmode=external -extldflags '-static'"]
   AfterBuild = ["benchsize", "benchdwarf"]
