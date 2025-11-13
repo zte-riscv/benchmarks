@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# markdown
+./prebuilt_bin/riscv64/sweet run -run markdown -assets-dir ./prebuilt_assets --prebuilt-binary-dir ./prebuilt_bin/riscv64/markdown/myconfig ./config_riscv64.toml
+
 # gopher-lua
 ./prebuilt_bin/riscv64/sweet run -run gopher-lua -assets-dir ./prebuilt_assets --prebuilt-binary-dir ./prebuilt_bin/riscv64/gopher-lua/myconfig ./config_riscv64.toml
 
