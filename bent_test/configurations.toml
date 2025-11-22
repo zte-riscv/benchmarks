@@ -1,0 +1,10 @@
+[[Configurations]]
+  Name = "RISC-V-Static"
+  Root = "$HOME/YOUR/GOROOT/PATH"
+  GcEnv = [
+    "GOOS=linux",
+    "GOARCH=riscv64",
+    "CGO_ENABLED=0"
+  ]
+  # BuildFlags = ["-ldflags=-linkmode=external -extldflags '-static'"]
+  AfterBuild = ["benchsize", "benchdwarf"]

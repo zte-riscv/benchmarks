@@ -1,0 +1,26 @@
+1. Download Bent
+link: https://pkg.go.dev/golang.org/x/benchmarks/cmd/bent#section-readme
+$ go install golang.org/x/benchmarks/cmd/bent@latest
+
+2. Init Bent config 
+$ mkdir scratch
+$ cd scratch
+$ bent -I     # init bent 
+You can create new benchmarks files or configurations. Modification for existing files is also accepted.
+Here, we provide a configuration(configurations.toml) for reference.
+
+3. Compile locally
+Bent does not support a flag to build tests without running. The flag "-g" means it will get benchmarks, but not build or run. A simple approach is not to modify bent. Even if it fails to run, it will still compile the corresponding test files and store them in the testbin directory. We only need to copy them to the RISCV environment and run them. Failure does not affect the compilation environment.
+Please specify the benchmarks and configurations files.
+$ bent -v -N 1 -B benchmarks-50.toml -C configurations.toml
+Here're meanings of some tags:
+| Flag | meaning |
+| -v | print commands as they are run |
+| -N x | benchmark/test repeat count |
+| -B file | benchmarks file |
+| -C file | configurations file |
+The running will result in a failure, but that's enough. You will get binary files under testbin.
+
+4. Test on RISCV
+You need to scp testbin to a RISCV environment. Then, you can run benchmark tests according to your benchmarks file. We offer a simple shell script and you can put it under testbin. The script need three parameters: benchmarks file, benchmark repeat count and output file.
+$ ./run-benchmark.sh benchmarks.toml 1 old.txt
