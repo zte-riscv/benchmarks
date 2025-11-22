@@ -46,6 +46,11 @@ type BuildConfig struct {
 
 	// BuildLog is used to pass the build log to a file.
 	BuildLog io.Writer
+
+	// PrebuiltBinaryDir is the path to the directory containing prebuilt binaries
+	// for cross-compilation. If set, Build should check for prebuilt binaries
+	// before compiling.
+	PrebuiltBinaryDir string
 }
 
 type RunConfig struct {

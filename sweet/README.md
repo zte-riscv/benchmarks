@@ -1,175 +1,71 @@
-# Sweet: Benchmarking Suite for Go Implementations
+# Sweet Benchmarks for RISC-V Cross-Compilation
 
-Sweet is a set of benchmarks derived from the Go community which are intended
-to represent a breadth of real-world applications. The primary use-case of this
-suite is to perform an evaluation of the difference in CPU and memory
-performance between two Go implementations.
+## Overview
 
-If you use this benchmarking suite for any measurements, please ensure you use
-a versioned release and note the version in the release.
+This repository provides a cross-compilation workflow for running Sweet benchmarks on RISC-V targets. The workflow allows you to compile benchmarks on x86 machines and run them on RISC-V machines without requiring network access.
 
-## Quickstart
+## How It Works
 
-### Supported Platforms
+Normally, Sweet requires:
+1. Running `sweet get` to download asset files from the network
+2. Running `sweet run` to compile and execute benchmarks
+3. Benchmarks reading asset files during execution
 
-* linux/amd64
+This repository pre-packages:
+- **Asset files** in `prebuilt_assets/` directory
+- **Pre-compiled RISC-V binaries** in `prebuilt_bin/riscv64/` directory
 
-### Dependencies
+This allows you to copy the repository to a RISC-V machine and run benchmarks directly without network access.
 
-The `sweet` tool only depends on having a stable version of Go and `git`.
+## Usage
 
-Some benchmarks, however, have various requirements for building. Notably
-they are:
+### Running Benchmarks
 
-* `make` (esbuild, tile38)
-* `bash` (tile38)
-* `binutils` (esbuild, tile38)
+On the RISC-V machine, from the `sweet` directory:
 
-The CockroachDB benchmark also requires a myriad of additional tools commonly
-available in most Linux distributions. A full list is not available yet; try
-running it and see what happens (sorry!).
-
-Please ensure your system has these tools installed and available in your
-system's PATH.
-
-Furthermore, some benchmarks are able to produce additional information
-on some platforms. For instance, running on platforms where systemd is available
-adds an average RSS measurement for the go-build benchmark.
-
-#### gVisor
-
-The gVisor benchmark has additional requirements:
-* The target platform must be `linux/amd64`. Nothing else is supported or ever
-  will be.
-* The `ptrace` API must be enabled on your system. Set
-  `/proc/sys/kernel/yama/ptrace_scope` appropriately (0 and 1 work, 2 might,
-  3 will not).
-
-### Download
-
-```sh
-$ git clone https://go.googlesource.com/benchmarks
-$ cd benchmarks/sweet
+```bash
+bash run_riscv64.bash
 ```
 
-### Build
+Results will be generated in the `results/` directory.
 
-```sh
-$ go build ./cmd/sweet
+### Recompiling for New Go Toolchain
+
+To test a new Go toolchain:
+
+1. Update the `GOROOT` path in `config_riscv64.toml`
+2. Run the compilation script:
+
+```bash
+bash compile_riscv64.bash
 ```
 
-### Getting assets
+The `--compile-only` flag compiles binaries without running tests, and `--compile-outdir` specifies where to save the compiled RISC-V binaries (default: `prebuilt_bin/`).
 
-```sh
-$ ./sweet get
-```
+## Supported Benchmarks
 
-### Running the benchmarks
+The following benchmarks work well for RISC-V testing:
+- `markdown`
+- `gopher-lua`
+- `biogo-krishna`
+- `biogo-igor`
 
-Create a configuration file called `config.toml` with the following contents:
+### Unsupported Benchmarks
 
-```toml
-[[config]]
-  name = "myconfig"
-  goroot = "<insert some GOROOT here>"
-```
+- `etcd`, `esbuild`: Fail during cross-compilation
+- `go-build`: Takes too long to execute
+- `bleve-index`, `tile38`: Asset files are too large
 
-Run the benchmarks by running:
+## Adding New Benchmarks
 
-```sh
-$ ./sweet run -shell config.toml
-```
+To add a new benchmark suite:
 
-Benchmark results will appear in the `results` directory.
-
-`-shell` will cause the tool to print each action it performs as a shell
-command. Note that while the shell commands are valid for many systems, they
-may depend on tools being available on your system that `sweet` does not
-require.
-
-Note that by default `sweet run` expects to be executed in
-`/path/to/x/benchmarks/sweet`, that is, the root of the Sweet subdirectory in
-the `x/benchmarks` repository.
-To execute it from somewhere else, point `-bench-dir` at
-`/path/to/x/benchmarks/sweet/benchmarks`.
-
-## Memory requirements
-
-These benchmarks generally try to stress the Go runtime in interesting ways, and
-some may end up with very large heaps. Therefore, it's recommended to run the
-suite on a system with at least 16 GiB of RAM available to minimize the chance
-that results are lost due to an out-of-memory error.
-
-## Configuration format
-
-The configuration is TOML-based and a more detailed description of fields may
-be found in the help docs for the `run` subcommand:
-
-```sh
-$ ./sweet help run
-```
-
-## Results format
-
-Results are produced into a single directory containing each benchmark as a
-sub-directory. Within each sub-directory is one file per configuration
-containing the stderr (and usually combined stdout) of the benchmark run,
-which also doubles as the benchmark output format.
-
-All results are reported in the standard Go testing package format, such that
-results may be compared using the
-[benchstat](https://godoc.org/golang.org/x/perf/cmd/benchstat) tool.
-
-Results then may also be composed together for easy viewing. For example, if
-one runs sweet with two configurations named `config1` and `config2`, then to
-quickly compare all results, do:
-
-```sh
-$ cat results/*/config1.results > config1.results
-$ cat results/*/config2.results > config2.results
-$ benchstat config1.results config2.results
-```
-
-## Logs
-
-If you encounter an error when running Sweet, the most helpful thing for
-debugging will be to look at the "log" output for each benchmark. This data can
-found next to the [results file](#results-format) in a file named after the
-Sweet configuration that produced it with the file extension `.log`. For
-example, the log for `etcd` for `config1` can be found at
-`results/etcd/config1.log` assuming the default results directory is used.
-
-## Noise
-
-This benchmark suite tries to keep noise low in measurements where possible.
-* Each measurement is taken against a fresh OS process.
-* Benchmarks have been modified to reduce noise from the input.
-  * All inputs are deterministic, including implicit inputs, such as querying an
-	existing database.
-  * Inputs are loaded into memory when possible instead of streamed from disk.
-* The suite mitigates external effects we can control (e.g. the suite is aware
-  of its co-tenancy with the benchmark and throttles itself when the benchmarks
-  are running).
-
-## General tips and rules of thumb
-
-* If you're not confident if your experimental Go toolchain will work with all
-  the benchmarks, try the `-short` flag to run to get much faster feedback on
-  whether each benchmark builds and runs.
-* You can expect the benchmarks to take a few hours to run with the default
-  settings.
-* If a benchmark fails to build or run, run with `-shell` and copy and re-run
-  the last command to get full output.
-  TODO(mknyszek): Dump the output to the terminal.
-
-### Tips for reducing noise
-
-* Sweet should be run on a dedicated machine where a [perflock
-  daemon](https://github.com/aclements/perflock) is running (to avoid noise due
-  to CPU throttling).
-* Avoid running these benchmarks in cloud environments if possible. Generally
-  the noise inherent to those environments can skew A/B tests and hide small
-  changes in performance. See [this paper](https://peerj.com/preprints/3507.pdf)
-  for more details. Try to use dedicated hardware instead.
-
-*Do not* compare results produced by separate invocations of the `sweet` tool.
+1. **Copy asset files** to `prebuilt_assets/` directory
+2. **Update scripts**:
+   - Add the benchmark to `compile_riscv64.bash`
+   - Add the benchmark to `run_riscv64.bash`
+3. **Compile**:
+   ```bash
+   bash compile_riscv64.bash
+   ```
+   This will save the compiled binary to `prebuilt_bin/` directory.

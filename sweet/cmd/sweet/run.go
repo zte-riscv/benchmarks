@@ -51,16 +51,19 @@ const (
 )
 
 type runCfg struct {
-	count       int
-	resultsDir  string
-	benchDir    string
-	assetsDir   string
-	workDir     string
-	assetsCache string
-	dumpCore    bool
-	pgo         bool
-	pgoCount    int
-	short       bool
+	count             int
+	resultsDir        string
+	benchDir          string
+	assetsDir         string
+	workDir           string
+	assetsCache       string
+	prebuiltBinaryDir string // Directory containing prebuilt binaries for cross-compilation
+	compileOutDir     string // Directory to copy compiled binaries to
+	compileOnly       bool   // Only compile binaries, don't run benchmarks
+	dumpCore          bool
+	pgo               bool
+	pgoCount          int
+	short             bool
 
 	assetsFS fs.FS
 }
@@ -145,6 +148,9 @@ func (c *runCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&c.runCfg.assetsDir, "assets-dir", "", "a directory containing uncompressed assets for sweet benchmarks, usually for debugging Sweet (overrides -cache)")
 	f.StringVar(&c.runCfg.workDir, "work-dir", "", "work directory for benchmarks (default: temporary directory)")
 	f.StringVar(&c.runCfg.assetsCache, "cache", assets.CacheDefault(), "cache location for assets")
+	f.StringVar(&c.runCfg.prebuiltBinaryDir, "prebuilt-binary-dir", "", "directory containing prebuilt binaries for cross-compilation (format: prebuilt-binary-dir/benchmark-name)")
+	f.StringVar(&c.runCfg.compileOutDir, "compile-outdir", "", "directory to copy compiled binaries to (format: compile-outdir/benchmark-name/config-name/)")
+	f.BoolVar(&c.runCfg.compileOnly, "compile-only", false, "only compile binaries, don't run benchmarks (can be used with -compile-outdir)")
 	f.BoolVar(&c.runCfg.dumpCore, "dump-core", false, "whether to dump core files for each benchmark process when it completes a benchmark")
 	f.BoolVar(&c.pgo, "pgo", false, "perform PGO testing; for each config, collect profiles from a baseline run which are used to feed into a generated PGO config")
 	f.IntVar(&c.runCfg.pgoCount, "pgo-count", 0, "the number of times to run profiling runs for -pgo; defaults to the value of -count if <=5, or 5 if higher")
@@ -202,6 +208,29 @@ func (c *runCmd) Run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("creating absolute path from results path (-results): %w", err)
 	}
+	if c.prebuiltBinaryDir != "" {
+		c.prebuiltBinaryDir, err = filepath.Abs(c.prebuiltBinaryDir)
+		if err != nil {
+			return fmt.Errorf("creating absolute path from prebuilt binary directory path (-prebuilt-binary-dir): %w", err)
+		}
+		if info, err := os.Stat(c.prebuiltBinaryDir); os.IsNotExist(err) {
+			return fmt.Errorf("prebuilt binary directory not found at %q", c.prebuiltBinaryDir)
+		} else if err != nil {
+			return fmt.Errorf("stat prebuilt binary directory %q: %v", c.prebuiltBinaryDir, err)
+		} else if info.Mode()&os.ModeDir == 0 {
+			return fmt.Errorf("%q is not a directory", c.prebuiltBinaryDir)
+		}
+	}
+	if c.compileOutDir != "" {
+		c.compileOutDir, err = filepath.Abs(c.compileOutDir)
+		if err != nil {
+			return fmt.Errorf("creating absolute path from compile output directory path (-compile-outdir): %w", err)
+		}
+		// Create the directory if it doesn't exist
+		if err := os.MkdirAll(c.compileOutDir, os.ModePerm); err != nil {
+			return fmt.Errorf("failed to create compile output directory %q: %w", c.compileOutDir, err)
+		}
+	}
 	if c.assetsDir != "" {
 		c.assetsDir, err = filepath.Abs(c.assetsDir)
 		if err != nil {
@@ -224,11 +253,11 @@ func (c *runCmd) Run(args []string) error {
 			return fmt.Errorf("creating absolute path from assets cache path (-cache): %w", err)
 		}
 		if info, err := os.Stat(c.assetsCache); os.IsNotExist(err) {
-			return fmt.Errorf("assets not found at %q (-assets-dir): did you forget to run `sweet get`?", c.assetsDir)
+			return fmt.Errorf("assets cache not found at %q: did you forget to run `sweet get`?", c.assetsCache)
 		} else if err != nil {
-			return fmt.Errorf("stat assets %q: %v", c.assetsDir, err)
+			return fmt.Errorf("stat assets cache %q: %v", c.assetsCache, err)
 		} else if info.Mode()&os.ModeDir == 0 {
-			return fmt.Errorf("%q (-assets-dir) is not a directory", c.assetsDir)
+			return fmt.Errorf("%q (-cache) is not a directory", c.assetsCache)
 		}
 		assetsDir, err := assets.CachedAssets(c.assetsCache, common.Version)
 		if err == assets.ErrNotInCache {

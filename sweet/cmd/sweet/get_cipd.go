@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"go.chromium.org/luci/cipd/client/cipd"
 	"go.chromium.org/luci/cipd/client/cipd/pkg"
@@ -19,6 +21,36 @@ import (
 	"golang.org/x/benchmarks/sweet/cli/assets"
 	"golang.org/x/benchmarks/sweet/common/log"
 )
+
+// dirSize calculates the total size of a directory in bytes.
+func dirSize(path string) (int64, error) {
+	var size int64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size, err
+}
+
+// formatBytes converts bytes to a human-readable string.
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	units := "KMGTPE"
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit && exp < len(units)-1; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), units[exp])
+}
 
 func (c *getCmd) Run(_ []string) error {
 	log.SetActivityLog(true)
@@ -95,12 +127,106 @@ func (c *getCmd) Run(_ []string) error {
 		return fmt.Errorf("unable to find CIPD package instance for version %s", c.version)
 	}
 
-	log.Printf("Fetching assets %s", c.version)
+	log.Printf("Fetching assets %s (this may take a while, please be patient...)", c.version)
+	log.Printf("Package instance: %s", pins[0])
+	log.Printf("Destination: %s", opts.Root)
+	log.Printf("Cache directory: %s", opts.CacheDir)
+	log.Printf("CIPD service URL: %s", opts.ServiceURL)
+
+	// Get initial sizes (may be 0 if directories don't exist yet)
+	initialRootSize, _ := dirSize(opts.Root)
+	initialCacheSize, _ := dirSize(opts.CacheDir)
+
+	// Start a goroutine to show progress indicators
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		count := 0
+		for {
+			select {
+			case <-ticker.C:
+				count++
+				// Check both cache and destination directories
+				cacheSize, cacheErr := dirSize(opts.CacheDir)
+				rootSize, rootErr := dirSize(opts.Root)
+
+				var downloadedSize int64
+				var sizeInfo string
+
+				if cacheErr == nil && rootErr == nil {
+					cacheDownloaded := cacheSize - initialCacheSize
+					rootDownloaded := rootSize - initialRootSize
+					if cacheDownloaded < 0 {
+						cacheDownloaded = 0
+					}
+					if rootDownloaded < 0 {
+						rootDownloaded = 0
+					}
+					// Total downloaded is the sum of cache and root
+					downloadedSize = cacheDownloaded + rootDownloaded
+					if downloadedSize > 0 {
+						sizeInfo = fmt.Sprintf(", downloaded: %s", formatBytes(downloadedSize))
+					}
+				} else if cacheErr == nil {
+					cacheDownloaded := cacheSize - initialCacheSize
+					if cacheDownloaded < 0 {
+						cacheDownloaded = 0
+					}
+					if cacheDownloaded > 0 {
+						sizeInfo = fmt.Sprintf(", cache: %s", formatBytes(cacheDownloaded))
+					}
+				} else if rootErr == nil {
+					rootDownloaded := rootSize - initialRootSize
+					if rootDownloaded < 0 {
+						rootDownloaded = 0
+					}
+					if rootDownloaded > 0 {
+						sizeInfo = fmt.Sprintf(", extracted: %s", formatBytes(rootDownloaded))
+					}
+				}
+
+				elapsed := count * 5
+				msg := fmt.Sprintf("Still downloading... (elapsed: %ds%s)", elapsed, sizeInfo)
+				// Warn if no progress after 30 seconds
+				if elapsed >= 30 && sizeInfo == "" {
+					msg += " [No data received yet - check network connection]"
+				}
+				log.Printf(msg)
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	// Fetch the instance.
 	_, err = cc.EnsurePackages(ctx, map[string]cipdc.PinSlice{"": pins[:1]}, &ensureOpts)
+	close(done)
+	wg.Wait()
+
 	if err != nil {
 		return fmt.Errorf("fetching CIPD package instance %s: %v", pins[0], err)
+	}
+
+	// Show final size
+	finalRootSize, rootErr := dirSize(opts.Root)
+	finalCacheSize, cacheErr := dirSize(opts.CacheDir)
+
+	if rootErr == nil && finalRootSize > 0 {
+		totalSize := finalRootSize - initialRootSize
+		if totalSize < 0 {
+			totalSize = finalRootSize
+		}
+		log.Printf("Successfully fetched assets %s (total size: %s)", c.version, formatBytes(totalSize))
+	} else if cacheErr == nil && finalCacheSize > initialCacheSize {
+		// If root directory check failed, at least show cache size
+		cacheSize := finalCacheSize - initialCacheSize
+		log.Printf("Successfully fetched assets %s (cache size: %s)", c.version, formatBytes(cacheSize))
+	} else {
+		log.Printf("Successfully fetched assets %s", c.version)
 	}
 	return nil
 }

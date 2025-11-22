@@ -1,0 +1,4 @@
+[[config]]
+  name = "myconfig"
+  goroot = "/home/10356270/dev/zte-riscv/go/"
+  envbuild = ["GOARCH=riscv64", "GORISCV64=rva23u64"]
