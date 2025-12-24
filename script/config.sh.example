@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# 镜像制作服务器配置
+# 请复制此文件为 config.sh 并填写实际的服务器信息
+
+# 镜像制作服务器地址
+IMAGE_SERVER="your-image-server-ip"
+
+# 镜像制作服务器用户名
+IMAGE_USER="root"
+
+# 镜像制作服务器密码
+IMAGE_PASS="your-password"
+
+# 镜像制作服务器工作路径
+IMAGE_SERVER_PATH="/root/ctk"
+
+# FTP服务器地址
+FTP_SERVER="your-ftp-server-ip"
+
+# FTP服务器用户名
+FTP_USER="your-ftp-username"
+
+# FTP服务器密码
+FTP_PASS="your-ftp-password"
+
+# FTP服务器远程目录
+FTP_REMOTE_DIR="/ctk"
+
